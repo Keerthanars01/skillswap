@@ -11,6 +11,13 @@ const skillSchema = new mongoose.Schema({
     description: { type: String, trim: true },
 });
 
+const reviewSchema = new mongoose.Schema({
+    reviewerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    sessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'Session', required: true },
+    rating: { type: Number, required: true, min: 1, max: 5 },
+    comment: { type: String, trim: true, default: '' },
+}, { timestamps: true });
+
 const userSchema = new mongoose.Schema(
     {
         name: { type: String, required: [true, 'Name is required'], trim: true },
@@ -37,6 +44,9 @@ const userSchema = new mongoose.Schema(
         skillsTeach: [skillSchema],
         skillsLearn: [skillSchema],
         reliabilityScore: { type: Number, default: 50, min: 0, max: 100 },
+        reviews: [reviewSchema],
+        averageRating: { type: Number, default: 0 },
+        totalRatings: { type: Number, default: 0 },
     },
     { timestamps: true }
 );

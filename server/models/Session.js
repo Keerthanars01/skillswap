@@ -27,11 +27,13 @@ const sessionSchema = new mongoose.Schema(
         meetingLink: { type: String, default: '' },
         completionStatus: {
             type: String,
-            enum: ['scheduled', 'completed', 'no-show', 'cancelled'],
-            default: 'scheduled',
+            enum: ['pending', 'scheduled', 'completed', 'no-show', 'cancelled'],
+            default: 'pending',
         },
         teacherConfirmed: { type: Boolean, default: false },
         learnerConfirmed: { type: Boolean, default: false },
+        cancellationReason: { type: String, default: '' },
+        isRated: { type: Boolean, default: false },
     },
     { timestamps: true }
 );

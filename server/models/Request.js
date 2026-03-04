@@ -26,7 +26,7 @@ const requestSchema = new mongoose.Schema(
         proposedDuration: { type: String, default: '', trim: true },
         status: {
             type: String,
-            enum: ['pending', 'accepted', 'rejected', 'cancelled'],
+            enum: ['pending', 'accepted', 'rejected', 'cancelled', 'scheduled', 'completed'],
             default: 'pending',
         },
     },

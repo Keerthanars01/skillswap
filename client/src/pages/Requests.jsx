@@ -22,6 +22,7 @@ const ScheduleModal = ({ request, onClose, onSuccess }) => {
 
     const submit = async () => {
         if (!date) return toast.error('Please select a date and time');
+        if (mode === 'online' && !link.trim()) return toast.error('Please provide a meeting link');
         setLoading(true);
         try {
             await api.post('/api/sessions', {
@@ -63,11 +64,11 @@ const ScheduleModal = ({ request, onClose, onSuccess }) => {
                     </div>
                     {mode === 'online' && (
                         <div>
-                            <label className="input-label">Meeting Link (optional)</label>
+                            <label className="input-label">Meeting Link</label>
                             <input className="input-field" placeholder="https://meet.google.com/..." value={link} onChange={(e) => setLink(e.target.value)} />
                         </div>
                     )}
-                    <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+                    <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem', position: 'sticky', bottom: '-2rem', background: 'var(--color-surface)', padding: '1rem 0 2rem 0', zIndex: 10, borderTop: '1px solid var(--color-border)' }}>
                         <button className="btn-primary" onClick={submit} disabled={loading} style={{ flex: 1, justifyContent: 'center' }}>
                             {loading ? 'Scheduling...' : 'Schedule'}
                         </button>
@@ -79,10 +80,8 @@ const ScheduleModal = ({ request, onClose, onSuccess }) => {
     );
 };
 
-const RequestCard = ({ request, type, onAction }) => {
+const RequestCard = ({ request, type, onAction, onSchedule }) => {
     const { user } = useAuth();
-    const qc = useQueryClient();
-    const [scheduleTarget, setScheduleTarget] = useState(null);
     const [loading, setLoading] = useState('');
 
     const partner = type === 'received' ? request.senderId : request.receiverId;
@@ -144,19 +143,16 @@ const RequestCard = ({ request, type, onAction }) => {
                     {loading === 'cancel' ? '...' : 'Cancel Request'}
                 </button>
             )}
-            {request.status === 'accepted' && (
-                <button className="btn-primary" onClick={() => setScheduleTarget(request)}
+            {request.status === 'accepted' && type === 'received' && (
+                <button className="btn-primary" onClick={onSchedule}
                     style={{ marginTop: '0.75rem', width: '100%', justifyContent: 'center', padding: '0.5rem' }}>
                     📅 Schedule Session
                 </button>
             )}
-
-            {scheduleTarget && (
-                <ScheduleModal
-                    request={scheduleTarget}
-                    onClose={() => setScheduleTarget(null)}
-                    onSuccess={() => { qc.invalidateQueries(['sessions-upcoming']); setScheduleTarget(null); }}
-                />
+            {request.status === 'accepted' && type === 'sent' && (
+                <div style={{ marginTop: '0.75rem', width: '100%', padding: '0.5rem', textAlign: 'center', color: 'var(--color-primary)', background: 'rgba(99, 102, 241, 0.1)', borderRadius: '8px', fontSize: '0.85rem', fontWeight: 500 }}>
+                    Waiting for other party to schedule.
+                </div>
             )}
         </div>
     );
@@ -164,6 +160,7 @@ const RequestCard = ({ request, type, onAction }) => {
 
 const Requests = () => {
     const [tab, setTab] = useState('received');
+    const [scheduleTarget, setScheduleTarget] = useState(null);
     const qc = useQueryClient();
 
     const { data: received, isLoading: loadR } = useQuery({
@@ -213,8 +210,20 @@ const Requests = () => {
                 </div>
             ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '1rem' }}>
-                    {list.map((r) => <RequestCard key={r._id} request={r} type={tab} onAction={refresh} />)}
+                    {list.map((r) => <RequestCard key={r._id} request={r} type={tab} onAction={refresh} onSchedule={() => setScheduleTarget(r)} />)}
                 </div>
+            )}
+
+            {scheduleTarget && (
+                <ScheduleModal
+                    request={scheduleTarget}
+                    onClose={() => setScheduleTarget(null)}
+                    onSuccess={() => {
+                        qc.invalidateQueries(['sessions-upcoming']);
+                        refresh();
+                        setScheduleTarget(null);
+                    }}
+                />
             )}
         </div>
     );

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'react-router-dom';
+import { formatDistanceToNow } from 'date-fns';
 import toast from 'react-hot-toast';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
@@ -249,10 +250,21 @@ const Profile = () => {
                         ) : (
                             /* ── View Mode ─────────────────────────────── */
                             <>
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', marginBottom: '0.25rem', flexWrap: 'wrap' }}>
                                     <h1 style={{ fontSize: '1.5rem', fontWeight: 700 }}>{profileUser.name}</h1>
                                     <ReliabilityRing score={profileUser.reliabilityScore || 50} />
                                 </div>
+                                {profileUser.totalRatings > 0 && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                                        <span style={{ color: '#fbbf24', fontSize: '1.1rem' }}>
+                                            {'★'.repeat(Math.round(profileUser.averageRating)) + '☆'.repeat(5 - Math.round(profileUser.averageRating))}
+                                        </span>
+                                        <span style={{ fontWeight: 600 }}>{profileUser.averageRating.toFixed(1)}</span>
+                                        <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                                            ({profileUser.totalRatings} {profileUser.totalRatings === 1 ? 'review' : 'reviews'})
+                                        </span>
+                                    </div>
+                                )}
 
                                 {profileUser.bio && (
                                     <p style={{ color: 'var(--color-text-muted)', marginBottom: '0.75rem', fontSize: '0.9rem', lineHeight: 1.6 }}>
@@ -334,6 +346,37 @@ const Profile = () => {
                     </div>
                 ))}
             </div>
+
+            {/* ─── Reviews Section ────────────────────────────────────────── */}
+            {profileUser.reviews?.length > 0 && (
+                <div className="glass-card" style={{ padding: '1.5rem', marginTop: '1.5rem' }}>
+                    <h2 style={{ fontWeight: 700, fontSize: '1.1rem', marginBottom: '1.25rem' }}>
+                        ⭐ Learner Reviews
+                    </h2>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        {profileUser.reviews.slice().reverse().map((review) => (
+                            <div key={review._id} style={{
+                                padding: '1rem', background: 'rgba(255,255,255,0.02)',
+                                border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px'
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                    <span style={{ color: '#fbbf24', fontSize: '1rem', letterSpacing: '2px' }}>
+                                        {'★'.repeat(review.rating) + '☆'.repeat(5 - review.rating)}
+                                    </span>
+                                    <span style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
+                                        {formatDistanceToNow(new Date(review.createdAt), { addSuffix: true })}
+                                    </span>
+                                </div>
+                                {review.comment ? (
+                                    <p style={{ fontSize: '0.85rem', lineHeight: 1.5 }}>"{review.comment}"</p>
+                                ) : (
+                                    <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>No comment provided</p>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

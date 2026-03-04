@@ -244,8 +244,106 @@ const AddSkillModal = ({ type, onClose, onSuccess }) => {
     );
 };
 
+// ─── Edit Skill Modal ────────────────────────────────────────────────────────
+const EditSkillModal = ({ type, skill, onClose, onSuccess }) => {
+    const [skillName, setSkillName] = useState(skill.name || '');
+    const [level, setLevel] = useState(skill.level || 'Beginner');
+    const [description, setDescription] = useState(skill.description || '');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const submit = async (e) => {
+        e.preventDefault();
+        if (!skillName.trim()) { setError('Skill name is required'); return; }
+        setLoading(true);
+        setError('');
+        try {
+            await api.put(`/api/users/skills/${type}/${skill._id}`, {
+                name: skillName.trim(),
+                level,
+                description: description.trim(),
+            });
+            toast.success(`"${skillName.trim()}" updated successfully!`);
+            onSuccess();
+            onClose();
+        } catch (e) {
+            toast.error(e.response?.data?.message || 'Failed to update skill');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-box" onClick={(e) => e.stopPropagation()}>
+                <h2 style={{ fontWeight: 700, marginBottom: '0.4rem' }}>
+                    {type === 'teach' ? '🎓 Edit Teach Skill' : '📚 Edit Learn Skill'}
+                </h2>
+                <p style={{ color: 'var(--color-text-muted)', fontSize: '0.82rem', marginBottom: '1.5rem' }}>
+                    Update your skill details below
+                </p>
+
+                <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div>
+                        <label className="input-label">Skill Name</label>
+                        <SkillAutocomplete
+                            value={skillName}
+                            onChange={setSkillName}
+                            placeholder="e.g. Python, Guitar, UI/UX Design…"
+                        />
+                        {error && <p className="input-error">{error}</p>}
+                    </div>
+
+                    <div>
+                        <label className="input-label">Proficiency Level</label>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            {['Beginner', 'Intermediate', 'Advanced'].map((l) => (
+                                <button
+                                    key={l}
+                                    type="button"
+                                    onClick={() => setLevel(l)}
+                                    style={{
+                                        flex: 1, padding: '0.5rem 0', borderRadius: 8, cursor: 'pointer',
+                                        fontWeight: 600, fontSize: '0.8rem', transition: 'all 0.2s',
+                                        border: level === l ? 'none' : '1px solid var(--color-border)',
+                                        background: level === l
+                                            ? (l === 'Beginner' ? 'rgba(16,185,129,0.25)' : l === 'Intermediate' ? 'rgba(245,158,11,0.25)' : 'rgba(239,68,68,0.25)')
+                                            : 'transparent',
+                                        color: level === l
+                                            ? (l === 'Beginner' ? '#34d399' : l === 'Intermediate' ? '#fbbf24' : '#f87171')
+                                            : 'var(--color-text-muted)',
+                                    }}
+                                >{l}</button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="input-label">Description <span style={{ opacity: 0.5, fontWeight: 400 }}>(optional)</span></label>
+                        <textarea
+                            className="input-field"
+                            placeholder="Brief note about your experience…"
+                            rows={2}
+                            style={{ resize: 'vertical' }}
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                        />
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
+                        <button type="submit" className="btn-primary" disabled={loading} style={{ flex: 1, justifyContent: 'center' }}>
+                            {loading ? 'Saving…' : 'Save Changes'}
+                        </button>
+                        <button type="button" className="btn-secondary" onClick={onClose} style={{ flex: 1, justifyContent: 'center' }}>Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
 // ─── Skill Card ─────────────────────────────────────────────────────────────
-const SkillCard = ({ skill, type, onDelete }) => {
+const SkillCard = ({ skill, type, onDelete, onEdit }) => {
     const [deleting, setDeleting] = useState(false);
     const handleDelete = async () => {
         setDeleting(true);
@@ -274,17 +372,29 @@ const SkillCard = ({ skill, type, onDelete }) => {
                     <p style={{ color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>{skill.description}</p>
                 )}
             </div>
-            <button
-                onClick={handleDelete}
-                disabled={deleting}
-                title="Remove skill"
-                style={{
-                    background: 'none', border: 'none', color: deleting ? '#6b7280' : '#f87171',
-                    cursor: deleting ? 'default' : 'pointer',
-                    fontSize: '1rem', padding: '0.25rem', flexShrink: 0, marginLeft: '0.5rem',
-                    transition: 'color 0.2s',
-                }}
-            >🗑</button>
+            <div style={{ display: 'flex', alignItems: 'center', marginLeft: '0.5rem' }}>
+                <button
+                    onClick={() => onEdit(skill)}
+                    title="Edit skill"
+                    style={{
+                        background: 'none', border: 'none', color: '#a5b4fc',
+                        cursor: 'pointer',
+                        fontSize: '1rem', padding: '0.25rem', flexShrink: 0,
+                        transition: 'color 0.2s', marginRight: '0.25rem'
+                    }}
+                >✏️</button>
+                <button
+                    onClick={handleDelete}
+                    disabled={deleting}
+                    title="Remove skill"
+                    style={{
+                        background: 'none', border: 'none', color: deleting ? '#6b7280' : '#f87171',
+                        cursor: deleting ? 'default' : 'pointer',
+                        fontSize: '1rem', padding: '0.25rem', flexShrink: 0,
+                        transition: 'color 0.2s',
+                    }}
+                >🗑</button>
+            </div>
         </div>
     );
 };
@@ -293,6 +403,7 @@ const SkillCard = ({ skill, type, onDelete }) => {
 const Skills = () => {
     const qc = useQueryClient();
     const [modal, setModal] = useState(null); // 'teach' | 'learn' | null
+    const [editModal, setEditModal] = useState(null); // { type, skill } | null
 
     const { data, isLoading } = useQuery({
         queryKey: ['me'],
@@ -346,7 +457,7 @@ const Skills = () => {
                             ) : (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                                     {list.map((s) => (
-                                        <SkillCard key={s._id} skill={s} type={type} onDelete={refresh} />
+                                        <SkillCard key={s._id} skill={s} type={type} onDelete={refresh} onEdit={(skill) => setEditModal({ type, skill })} />
                                     ))}
                                 </div>
                             )}
@@ -359,6 +470,14 @@ const Skills = () => {
                 <AddSkillModal
                     type={modal}
                     onClose={() => setModal(null)}
+                    onSuccess={refresh}
+                />
+            )}
+            {editModal && (
+                <EditSkillModal
+                    type={editModal.type}
+                    skill={editModal.skill}
+                    onClose={() => setEditModal(null)}
                     onSuccess={refresh}
                 />
             )}

@@ -15,6 +15,7 @@ const matchRoutes = require('./routes/matches');
 const requestRoutes = require('./routes/requests');
 const sessionRoutes = require('./routes/sessions');
 const notificationRoutes = require('./routes/notifications');
+const reportRoutes = require('./routes/reports');
 
 // Connect to MongoDB
 connectDB();
@@ -58,6 +59,7 @@ app.use('/api/matches', matchRoutes);
 app.use('/api/requests', requestRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/reports', reportRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

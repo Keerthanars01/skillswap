@@ -1,12 +1,58 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import toast from 'react-hot-toast';
 import api from '../lib/axios';
 import { useAuth } from '../context/AuthContext';
+import ReportUserModal from '../components/ReportUserModal';
+
+// ─── Cancel Session Modal ────────────────────────────────────────────────────
+const CancelSessionModal = ({ session, onClose, onConfirm, loading }) => {
+    const [reason, setReason] = useState('');
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onConfirm(reason);
+    };
+
+    return (
+        <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1000 }}>
+            <div className="modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 400 }}>
+                <h2 style={{ fontWeight: 700, marginBottom: '0.5rem', textAlign: 'center', color: 'var(--color-danger)' }}>Cancel Session</h2>
+                <p style={{ color: 'var(--color-text-muted)', fontSize: '0.85rem', textAlign: 'center', marginBottom: '1.5rem' }}>
+                    Please provide a reason for cancelling this session with {session.partner?.name}.
+                </p>
+                <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                    <div>
+                        <label className="input-label">Reason for cancellation (Required)</label>
+                        <textarea
+                            className="input-field"
+                            placeholder="I have an unexpected meeting..."
+                            rows={3}
+                            value={reason}
+                            onChange={(e) => setReason(e.target.value)}
+                            required
+                        />
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+                        <button type="submit" className="btn-danger" disabled={loading || !reason.trim()} style={{ flex: 1, justifyContent: 'center' }}>
+                            {loading ? 'Cancelling...' : 'Confirm Cancel'}
+                        </button>
+                        <button type="button" className="btn-secondary" onClick={onClose} disabled={loading} style={{ flex: 1, justifyContent: 'center' }}>
+                            Close
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
 
 const Schedule = () => {
     const { user } = useAuth();
     const qc = useQueryClient();
+    const [cancelTarget, setCancelTarget] = useState(null);
+    const [reportTarget, setReportTarget] = useState(null);
 
     const { data, isLoading } = useQuery({
         queryKey: ['sessions-upcoming'],
@@ -19,8 +65,19 @@ const Schedule = () => {
             toast.success('Session confirmed!');
             qc.invalidateQueries(['sessions-upcoming']);
             qc.invalidateQueries(['sessions-history']);
+            qc.invalidateQueries(['requests-received']);
+            qc.invalidateQueries(['requests-sent']);
         },
         onError: (e) => toast.error(e.response?.data?.message || 'Failed to confirm'),
+    });
+
+    const confirmScheduleMutation = useMutation({
+        mutationFn: (id) => api.put(`/api/sessions/${id}/confirm-schedule`),
+        onSuccess: () => {
+            toast.success('Scheduled time confirmed!');
+            qc.invalidateQueries(['sessions-upcoming']);
+        },
+        onError: (e) => toast.error(e.response?.data?.message || 'Failed to confirm time'),
     });
 
     const noShowMutation = useMutation({
@@ -28,8 +85,23 @@ const Schedule = () => {
         onSuccess: () => {
             toast.success('Marked as no-show');
             qc.invalidateQueries(['sessions-upcoming']);
+            qc.invalidateQueries(['requests-received']);
+            qc.invalidateQueries(['requests-sent']);
         },
         onError: (e) => toast.error(e.response?.data?.message || 'Failed'),
+    });
+
+    const cancelMutation = useMutation({
+        mutationFn: ({ id, reason }) => api.put(`/api/sessions/${id}/cancel`, { reason }),
+        onSuccess: () => {
+            toast.success('Session cancelled');
+            setCancelTarget(null);
+            qc.invalidateQueries(['sessions-upcoming']);
+            qc.invalidateQueries(['sessions-history']);
+            qc.invalidateQueries(['requests-received']);
+            qc.invalidateQueries(['requests-sent']);
+        },
+        onError: (e) => toast.error(e.response?.data?.message || 'Failed to cancel'),
     });
 
     const sessions = data?.sessions || [];
@@ -106,7 +178,8 @@ const Schedule = () => {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                             {sessions.map((s) => {
                                 const partner = getPartner(s);
-                                const sessionPast = isPast(new Date(s.date));
+                                const sessionEndTime = new Date(new Date(s.date).getTime() + (s.duration || 60) * 60000);
+                                const isSessionEnded = new Date() > sessionEndTime;
                                 const iAmTeacher = s.teacherId?._id === user?._id;
                                 const myConfirmed = iAmTeacher ? s.teacherConfirmed : s.learnerConfirmed;
 
@@ -135,36 +208,91 @@ const Schedule = () => {
                                                     <span style={{ color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
                                                         ⏱ {s.duration} min
                                                     </span>
-                                                    {!sessionPast && (
+                                                    {!isSessionEnded && (
                                                         <span style={{ color: '#10b981', fontSize: '0.75rem' }}>
-                                                            ⏳ {formatDistanceToNow(new Date(s.date), { addSuffix: true })}
+                                                            {new Date() > new Date(s.date)
+                                                                ? '⏳ Ongoing currently'
+                                                                : `⏳ ${formatDistanceToNow(new Date(s.date), { addSuffix: true })}`}
                                                         </span>
                                                     )}
                                                 </div>
-                                                {s.meetingLink && (
-                                                    <a href={s.meetingLink} target="_blank" rel="noreferrer"
-                                                        style={{ color: 'var(--color-accent)', fontSize: '0.78rem', display: 'block', marginTop: '0.4rem' }}>
-                                                        🔗 Join Meeting
-                                                    </a>
-                                                )}
-                                                {sessionPast && !myConfirmed && (
+                                                {s.completionStatus === 'pending' ? (
                                                     <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.875rem' }}>
-                                                        <button className="btn-success"
-                                                            onClick={() => confirmMutation.mutate(s._id)}
-                                                            disabled={confirmMutation.isPending}
-                                                            style={{ fontSize: '0.8rem', padding: '0.4rem 1rem' }}>
-                                                            ✓ Confirm Completed
-                                                        </button>
+                                                        {s.requestId?.senderId === user?._id ? (
+                                                            <button className="btn-primary"
+                                                                onClick={() => confirmScheduleMutation.mutate(s._id)}
+                                                                disabled={confirmScheduleMutation.isPending}
+                                                                style={{ fontSize: '0.8rem', padding: '0.4rem 1rem' }}>
+                                                                ✓ Confirm Time
+                                                            </button>
+                                                        ) : (
+                                                            <p style={{ color: 'var(--color-warning)', fontSize: '0.8rem', fontWeight: 500, alignSelf: 'center' }}>
+                                                                ⏳ Waiting for partner to confirm
+                                                            </p>
+                                                        )}
                                                         <button className="btn-danger"
-                                                            onClick={() => noShowMutation.mutate(s._id)}
-                                                            disabled={noShowMutation.isPending}
+                                                            onClick={() => setCancelTarget({ ...s, partner })}
+                                                            disabled={cancelMutation.isPending}
                                                             style={{ fontSize: '0.8rem', padding: '0.4rem 1rem' }}>
-                                                            No-Show
+                                                            Cancel Session
                                                         </button>
                                                     </div>
-                                                )}
-                                                {myConfirmed && (
-                                                    <p style={{ color: '#10b981', fontSize: '0.78rem', marginTop: '0.5rem' }}>✓ You confirmed this session</p>
+                                                ) : (
+                                                    <>
+                                                        {s.meetingLink && (
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.preventDefault();
+                                                                    let link = s.meetingLink;
+                                                                    if (!link.startsWith('http://') && !link.startsWith('https://')) {
+                                                                        link = 'https://' + link;
+                                                                    }
+                                                                    window.open(link, '_blank');
+                                                                }}
+                                                                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--color-accent)', fontSize: '0.78rem', display: 'block', marginTop: '0.4rem', textDecoration: 'underline' }}>
+                                                                🔗 Join Meeting
+                                                            </button>
+                                                        )}
+                                                        {isSessionEnded && !myConfirmed && (
+                                                            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.875rem' }}>
+                                                                <button className="btn-success"
+                                                                    onClick={() => confirmMutation.mutate(s._id)}
+                                                                    disabled={confirmMutation.isPending}
+                                                                    style={{ fontSize: '0.8rem', padding: '0.4rem 1rem' }}>
+                                                                    ✓ Confirm Completed
+                                                                </button>
+                                                                <button className="btn-danger"
+                                                                    onClick={() => noShowMutation.mutate(s._id)}
+                                                                    disabled={noShowMutation.isPending}
+                                                                    style={{ fontSize: '0.8rem', padding: '0.4rem 1rem' }}>
+                                                                    No-Show
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                        {myConfirmed && (
+                                                            <p style={{ color: '#10b981', fontSize: '0.78rem', marginTop: '0.5rem' }}>✓ You confirmed this session</p>
+                                                        )}
+                                                        {!isSessionEnded && (
+                                                            <div style={{ marginTop: '0.875rem' }}>
+                                                                <button className="btn-danger"
+                                                                    onClick={() => setCancelTarget({ ...s, partner })}
+                                                                    disabled={cancelMutation.isPending}
+                                                                    style={{ fontSize: '0.8rem', padding: '0.4rem 1rem' }}>
+                                                                    Cancel Session
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                        <div style={{ marginTop: '0.875rem', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '0.5rem' }}>
+                                                            <button
+                                                                onClick={() => setReportTarget({ user: partner, session: s })}
+                                                                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: '0.72rem', textDecoration: 'underline', transition: 'color 0.2s' }}
+                                                                onMouseOver={(e) => e.target.style.color = 'var(--color-danger)'}
+                                                                onMouseOut={(e) => e.target.style.color = 'var(--color-text-muted)'}
+                                                            >
+                                                                🚩 Report User
+                                                            </button>
+                                                        </div>
+                                                    </>
                                                 )}
                                             </div>
                                         </div>
@@ -175,6 +303,23 @@ const Schedule = () => {
                     )}
                 </div>
             </div>
+
+            {cancelTarget && (
+                <CancelSessionModal
+                    session={cancelTarget}
+                    onClose={() => setCancelTarget(null)}
+                    onConfirm={(reason) => cancelMutation.mutate({ id: cancelTarget._id, reason })}
+                    loading={cancelMutation.isPending}
+                />
+            )}
+
+            {reportTarget && (
+                <ReportUserModal
+                    reportedUser={reportTarget.user}
+                    session={reportTarget.session}
+                    onClose={() => setReportTarget(null)}
+                />
+            )}
         </div>
     );
 };

@@ -37,9 +37,11 @@ export const AuthProvider = ({ children }) => {
             const { data } = await api.get('/api/auth/me');
             setUser(data.user);
             localStorage.setItem('skillswap_user', JSON.stringify(data.user));
-        } catch {
-            // Token expired or invalid — logout
-            logout();
+        } catch (error) {
+            // Only logout on explicit 401 Unauthorized
+            if (error.response?.status === 401) {
+                logout();
+            }
         }
     }, [logout]);
 

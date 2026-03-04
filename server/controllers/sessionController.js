@@ -1,5 +1,6 @@
 const Session = require('../models/Session');
 const Request = require('../models/Request');
+const User = require('../models/User');
 const { updateReliabilityScore } = require('../utils/scoreCalculator');
 const { createNotification } = require('../utils/notify');
 
@@ -20,13 +21,9 @@ const scheduleSession = async (req, res, next) => {
             return next(new Error('Request must be accepted before scheduling a session'));
         }
 
-        // Ensure user is part of this request
-        const isParticipant =
-            request.senderId.toString() === req.user._id.toString() ||
-            request.receiverId.toString() === req.user._id.toString();
-        if (!isParticipant) {
+        if (request.receiverId.toString() !== req.user._id.toString()) {
             res.status(403);
-            return next(new Error('Not authorized'));
+            return next(new Error('Only the receiver can schedule the session'));
         }
 
         // Validate date is in the future
@@ -35,26 +32,33 @@ const scheduleSession = async (req, res, next) => {
             return next(new Error('Session date must be in the future'));
         }
 
+        if (mode === 'online' && (!meetingLink || meetingLink.trim() === '')) {
+            res.status(400);
+            return next(new Error('Meeting link is required for online sessions'));
+        }
+
         // Prevent duplicate session for same request
         const existing = await Session.findOne({
             requestId,
-            completionStatus: 'scheduled',
+            completionStatus: { $in: ['pending', 'scheduled'] },
         });
         if (existing) {
             res.status(400);
             return next(new Error('A session is already scheduled for this request'));
         }
 
-        // Sender teaches, receiver learns (based on request)
+        // Sender learns, receiver teaches (based on request)
         const session = await Session.create({
             requestId,
-            teacherId: request.senderId,
-            learnerId: request.receiverId,
+            teacherId: request.receiverId,
+            learnerId: request.senderId,
             date,
             duration: duration || 60,
             mode: mode || 'online',
             meetingLink: meetingLink || '',
         });
+
+        await Request.findByIdAndUpdate(requestId, { status: 'scheduled' });
 
         const otherId =
             request.senderId.toString() === req.user._id.toString()
@@ -78,14 +82,19 @@ const scheduleSession = async (req, res, next) => {
 // @access  Private
 const getUpcomingSessions = async (req, res, next) => {
     try {
+        // We want to include sessions that are currently ongoing.
+        // Allowing sessions up to 4 hours in the past keeps them visible 
+        // until they are explicitly marked completed or cancelled.
+        const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000);
+
         const sessions = await Session.find({
             $or: [{ teacherId: req.user._id }, { learnerId: req.user._id }],
-            completionStatus: 'scheduled',
-            date: { $gte: new Date() },
+            completionStatus: { $in: ['pending', 'scheduled'] },
+            date: { $gte: fourHoursAgo },
         })
             .populate('teacherId', 'name avatar')
             .populate('learnerId', 'name avatar')
-            .populate('requestId', 'teachSkill learnSkill')
+            .populate('requestId', 'teachSkill learnSkill senderId receiverId')
             .sort({ date: 1 });
 
         res.json({ success: true, sessions });
@@ -105,7 +114,7 @@ const getSessionHistory = async (req, res, next) => {
         })
             .populate('teacherId', 'name avatar')
             .populate('learnerId', 'name avatar')
-            .populate('requestId', 'teachSkill learnSkill')
+            .populate('requestId', 'teachSkill learnSkill senderId receiverId')
             .sort({ date: -1 });
 
         res.json({ success: true, sessions });
@@ -140,6 +149,8 @@ const confirmSession = async (req, res, next) => {
         if (session.teacherConfirmed && session.learnerConfirmed) {
             session.completionStatus = 'completed';
             await session.save();
+
+            await Request.findByIdAndUpdate(session.requestId, { status: 'completed' });
 
             await updateReliabilityScore(session.teacherId);
             await updateReliabilityScore(session.learnerId);
@@ -242,6 +253,153 @@ const rescheduleSession = async (req, res, next) => {
     }
 };
 
+// @desc    Confirm a scheduled session by the sender
+// @route   PUT /api/sessions/:id/confirm-schedule
+// @access  Private
+const confirmSchedule = async (req, res, next) => {
+    try {
+        const session = await Session.findById(req.params.id).populate('requestId');
+        if (!session) {
+            res.status(404);
+            return next(new Error('Session not found'));
+        }
+
+        if (session.requestId.senderId.toString() !== req.user._id.toString()) {
+            res.status(403);
+            return next(new Error('Only the sender can confirm this schedule'));
+        }
+
+        session.completionStatus = 'scheduled';
+        await session.save();
+
+        await createNotification(
+            session.requestId.receiverId,
+            `${req.user.name} confirmed the scheduled session`,
+            'session'
+        );
+
+        res.json({ success: true, session });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Cancel a session
+// @route   PUT /api/sessions/:id/cancel
+// @access  Private
+const cancelSession = async (req, res, next) => {
+    try {
+        const { reason } = req.body;
+        if (!reason) {
+            res.status(400);
+            return next(new Error('Cancellation reason is required'));
+        }
+
+        const session = await Session.findById(req.params.id);
+        if (!session) {
+            res.status(404);
+            return next(new Error('Session not found'));
+        }
+
+        const isParticipant =
+            session.teacherId.toString() === req.user._id.toString() ||
+            session.learnerId.toString() === req.user._id.toString();
+        if (!isParticipant) {
+            res.status(403);
+            return next(new Error('Not authorized'));
+        }
+
+        if (session.completionStatus !== 'pending' && session.completionStatus !== 'scheduled') {
+            res.status(400);
+            return next(new Error(`Cannot cancel a session that is already ${session.completionStatus}`));
+        }
+
+        session.completionStatus = 'cancelled';
+        session.cancellationReason = reason;
+        await session.save();
+
+        await Request.findByIdAndUpdate(session.requestId, { status: 'accepted' });
+
+        const otherId = session.teacherId.toString() === req.user._id.toString() ? session.learnerId : session.teacherId;
+        await createNotification(
+            otherId,
+            `${req.user.name} cancelled your session. Reason: ${reason}`,
+            'session'
+        );
+
+        res.json({ success: true, session });
+    } catch (error) {
+        next(error);
+    }
+};
+
+// @desc    Rate a completed session (learner rates teacher)
+// @route   POST /api/sessions/:id/rate
+// @access  Private
+const rateSession = async (req, res, next) => {
+    try {
+        const session = await Session.findById(req.params.id);
+        if (!session) {
+            res.status(404);
+            return next(new Error('Session not found'));
+        }
+
+        if (session.completionStatus !== 'completed') {
+            res.status(400);
+            return next(new Error('Can only rate completed sessions'));
+        }
+
+        if (session.learnerId.toString() !== req.user._id.toString()) {
+            res.status(403);
+            return next(new Error('Only the learner can rate this session'));
+        }
+
+        if (session.isRated) {
+            res.status(400);
+            return next(new Error('You have already rated this session'));
+        }
+
+        const { rating, comment } = req.body;
+        if (!rating || rating < 1 || rating > 5) {
+            res.status(400);
+            return next(new Error('Please provide a valid rating between 1 and 5'));
+        }
+
+        const teacher = await User.findById(session.teacherId);
+        if (!teacher) {
+            res.status(404);
+            return next(new Error('Teacher not found'));
+        }
+
+        teacher.reviews.push({
+            reviewerId: req.user._id,
+            sessionId: session._id,
+            rating,
+            comment,
+        });
+
+        // Calculate new average
+        const totalRating = teacher.reviews.reduce((sum, r) => sum + r.rating, 0);
+        teacher.averageRating = totalRating / teacher.reviews.length;
+        teacher.totalRatings = teacher.reviews.length;
+
+        await teacher.save();
+
+        session.isRated = true;
+        await session.save();
+
+        await createNotification(
+            teacher._id,
+            `${req.user.name} left a ${rating}-star review for your session!`,
+            'session'
+        );
+
+        res.json({ success: true, teacher });
+    } catch (error) {
+        next(error);
+    }
+};
+
 module.exports = {
     scheduleSession,
     getUpcomingSessions,
@@ -249,4 +407,7 @@ module.exports = {
     confirmSession,
     markNoShow,
     rescheduleSession,
+    confirmSchedule,
+    cancelSession,
+    rateSession,
 };

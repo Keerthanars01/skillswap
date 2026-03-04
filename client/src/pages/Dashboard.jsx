@@ -63,8 +63,8 @@ const Dashboard = () => {
     });
 
     const pending = requestData?.requests?.filter((r) => r.status === 'pending') || [];
-    const taught = historyData?.sessions?.filter((s) => s.teacherId?._id === user?._id && s.completionStatus === 'completed') || [];
-    const learned = historyData?.sessions?.filter((s) => s.learnerId?._id === user?._id && s.completionStatus === 'completed') || [];
+    const taught = historyData?.sessions?.filter((s) => s.requestId?.receiverId === user?._id && s.completionStatus === 'completed') || [];
+    const learned = historyData?.sessions?.filter((s) => s.requestId?.senderId === user?._id && s.completionStatus === 'completed') || [];
     const topMatches = matchData?.matches?.slice(0, 3) || [];
     const upcoming = sessionData?.sessions?.slice(0, 3) || [];
 
@@ -162,7 +162,11 @@ const Dashboard = () => {
                                                     {s.requestId?.teachSkill} ↔ {s.requestId?.learnSkill}
                                                 </p>
                                             </div>
-                                            <span className="badge badge-info">{s.mode}</span>
+                                            {s.completionStatus === 'pending' ? (
+                                                <span className="badge badge-warning">Pending Conf</span>
+                                            ) : (
+                                                <span className="badge badge-info">{s.mode}</span>
+                                            )}
                                         </div>
                                         <p style={{ color: 'var(--color-primary)', fontSize: '0.78rem', marginTop: '0.5rem', fontWeight: 600 }}>
                                             📅 {format(new Date(s.date), 'MMM d, yyyy • h:mm a')}
